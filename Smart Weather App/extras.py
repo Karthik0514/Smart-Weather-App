@@ -3,26 +3,24 @@ import datetime
 import random
 
 def get_today_in_history():
-    today = datetime.datetime.now()
-    month = today.month
-    day = today.day
-    url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month}/{day}"
-
     try:
+        # Using a free historical events API
+        url = "https://history.muffinlabs.com/date"
         response = requests.get(url)
         if response.status_code == 200:
-            events = response.json().get("events", [])
+            data = response.json()
+            events = data.get("data", {}).get("Events", [])
             if events:
                 event = random.choice(events)
                 year = event.get("year", "Unknown year")
                 description = event.get("text", "")
                 return f"📜 On this day in {year}: {description}"
             else:
-                return "No events found for today."
+                return "📜 No historical events available."
         else:
-            return "Failed to retrieve historical data."
+            return "📜 Could not fetch historical events."
     except Exception as e:
-        return f"Error fetching history: {e}"
+        return f"📜 Error fetching history: {e}"
 
 def get_random_fun_fact():
     try:

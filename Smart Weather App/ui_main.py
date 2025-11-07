@@ -17,11 +17,69 @@ import os
 from sunrise_sunset import get_sunrise_sunset
 from extras import get_daily_quote, get_random_fun_fact, get_today_in_history
 from health_tips import get_health_tip
-from auto_location import get_user_location
 from weather_alerts import get_coordinates, get_weather_alerts
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction
 from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QThread, pyqtSignal
+import requests 
+
+def get_user_location():
+    """USER LOCATION STUFF"""
+    services = [
+        "https://ipapi.co/json/",
+        "https://ipinfo.io/json",
+        "http://ip-api.com/json/"
+    ]
+
+    for url in services:
+        try:
+            print(f"🔍 Trying {url}")
+            resp = requests.get(url, timeout=4)
+            if resp.status_code == 200:
+                data = resp.json()
+                print(f"✅ Response from {url}: {data}")
+
+                # Handle ipapi rate-limit message
+                if "error" in data and data.get("reason") == "RateLimited":
+                    print("⚠️ ipapi.co rate limited, moving to next service.")
+                    continue
+
+                # Extract city/region info for different APIs
+                for key in ["city", "regionName", "region"]:
+                    if key in data and data[key]:
+                        city = data[key]
+                        print(f"✅ Detected city: {city}")
+                        return city
+
+                # Fallback to country if city missing
+                for key in ["country_name", "country"]:
+                    if key in data and data[key]:
+                        print(f"✅ Using country as fallback: {data[key]}")
+                        return data[key]
+        except Exception as e:
+            print(f"⚠️ {url} failed: {e}")
+
+    print("❌ All location services failed.")
+    return None
+
+
+
+class LocationThread(QThread):
+    location_found = pyqtSignal(str)
+    failed = pyqtSignal()
+
+    def run(self):
+        try:
+            city = get_user_location()
+            if city:
+                self.location_found.emit(city)
+            else:
+                self.failed.emit()
+        except Exception as e:
+            print("Location thread error:", e)
+            self.failed.emit()
+
 
 
 class WeatherApp(QMainWindow):
@@ -249,14 +307,22 @@ class WeatherApp(QMainWindow):
         # Resize loading overlay
         self.loading_overlay.setGeometry(0, 0, self.width(), self.height())
 
-        # Auto-detect location
-        auto_city = get_user_location()
-        if auto_city:
-            self.city_input.setText(auto_city)
-            self.fetch_weather()
+        # Run auto-location in a background thread so UI doesn't freeze
+        self.location_thread = LocationThread()
+        self.location_thread.location_found.connect(self._on_location_found)
+        self.location_thread.failed.connect(self._on_location_failed)
+        self.location_thread.start()
+
 
         self.show()
     
+    def _on_location_found(self, city):
+        self.city_input.setText(city)
+        self.fetch_weather()
+
+    def _on_location_failed(self):
+        self.city_input.setPlaceholderText("Enter city (auto-location failed)")
+
     def resizeEvent(self, event):
         if hasattr(self, "background_label"):
             self.background_label.setGeometry(0, 0, self.width(), self.height())
@@ -353,6 +419,9 @@ class WeatherApp(QMainWindow):
             gif_path = "assets/storm.gif"
         elif "drizzle" in condition:
             gif_path = "assets/drizzle.gif"
+        elif any(word in condition.lower() for word in ["mist", "fog", "haze", "smog", "foggy", "misty", "hazy", "drizzle", "murk", "vapor"]):
+            gif_path = "assets/mist.gif"
+
 
         self.movie.stop()
         self.movie = QMovie(gif_path)
